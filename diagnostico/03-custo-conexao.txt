@@ -1,0 +1,3 @@
+Data: 2026-11-10T19:46:26.723Z  (banco sem carga do k6)
+conexao nova por consulta (db.js original)       n=200  media=6.678 ms  mediana=6.361 ms  p95=7.388 ms
+conexao reutilizada                              n=200  media=0.214 ms  mediana=0.199 ms  p95=0.281 ms

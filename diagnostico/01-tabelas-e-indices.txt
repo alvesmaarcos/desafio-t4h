@@ -1,0 +1,80 @@
+=== Versão e parâmetros relevantes do PostgreSQL ===
+                                                       version                                                       
+---------------------------------------------------------------------------------------------------------------------
+ PostgreSQL 16.4 (Debian 16.4-1.pgdg120+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14) 12.2.0, 64-bit
+(1 row)
+
+              name               | setting | unit 
+---------------------------------+---------+------
+ effective_cache_size            | 524288  | 8kB
+ jit                             | on      | 
+ max_connections                 | 100     | 
+ max_parallel_workers_per_gather | 2       | 
+ random_page_cost                | 4       | 
+ shared_buffers                  | 16384   | 8kB
+ work_mem                        | 4096    | kB
+(7 rows)
+
+=== Linhas e tamanho de cada tabela (dados + índices) ===
+    tabela    | linhas_estimadas | tamanho_dados | tamanho_indices | tamanho_total 
+--------------+------------------+---------------+-----------------+---------------
+ pedidos      |           500000 | 163 MB        | 11 MB           | 174 MB
+ itens_pedido |          1500000 | 75 MB         | 32 MB           | 107 MB
+ clientes     |           100000 | 9248 kB       | 2208 kB         | 11 MB
+ produtos     |            20000 | 1520 kB       | 456 kB          | 2016 kB
+(4 rows)
+
+=== Índices existentes ===
+    tabela    |      indice       |                                   definicao                                   
+--------------+-------------------+-------------------------------------------------------------------------------
+ clientes     | clientes_pkey     | CREATE UNIQUE INDEX clientes_pkey ON public.clientes USING btree (id)
+ itens_pedido | itens_pedido_pkey | CREATE UNIQUE INDEX itens_pedido_pkey ON public.itens_pedido USING btree (id)
+ pedidos      | pedidos_pkey      | CREATE UNIQUE INDEX pedidos_pkey ON public.pedidos USING btree (id)
+ produtos     | produtos_pkey     | CREATE UNIQUE INDEX produtos_pkey ON public.produtos USING btree (id)
+(4 rows)
+
+=== Seq scan x index scan acumulados desde a subida do banco (inclui as 3 medições da linha de base) ===
+    tabela    | seq_scan | linhas_lidas_por_seq_scan | idx_scan | linhas_lidas_por_indice 
+--------------+----------+---------------------------+----------+-------------------------
+ itens_pedido |     1823 |                1314000000 |        0 |                       0
+ pedidos      |      946 |                 225500000 |  1500182 |                 1500000
+ clientes     |      131 |                  13000000 |   500349 |                  500341
+ produtos     |      214 |                   4260000 |  1502330 |                 1502260
+(4 rows)
+
+=== Conexões abertas no banco desde a subida (cada conexão nova = um processo backend novo) ===
+ datname | conexoes_ativas_agora | transacoes_confirmadas | blocos_lidos_do_disco | blocos_lidos_do_cache | taxa_acerto_cache_pct | arquivos_temporarios | bytes_temporarios | stats_reset 
+---------+-----------------------+------------------------+-----------------------+-----------------------+-----------------------+----------------------+-------------------+-------------
+ loja    |                     1 |                  11506 |               7730490 |              35125494 |                 81.96 |                  101 | 2008 MB           | 
+(1 row)
+
+=== Distribuição dos pedidos por status (base do GET /pedidos) ===
+  status   | pedidos 
+-----------+---------
+ cancelado |   50000
+ entregue  |  125000
+ pago      |  300000
+ pendente  |   25000
+(4 rows)
+
+=== Tamanho médio da coluna observacoes (trafegada por SELECT * em pedidos) ===
+ bytes_medios_observacoes | bytes_medios_demais_colunas_aprox 
+--------------------------+-----------------------------------
+                      274 |                                22
+(1 row)
+
+=== Quantas consultas o GET /clientes/:id/pedidos dispara (1 + 1 + N pedidos + M itens) ===
+ cliente_id | pedidos | itens | consultas_disparadas_pela_rota 
+------------+---------+-------+--------------------------------
+          7 |       5 |    10 |                             17
+         42 |       5 |    10 |                             17
+      31337 |       5 |    10 |                             17
+      99999 |       5 |    20 |                             27
+(4 rows)
+
+=== Média de pedidos e itens por cliente (todos os clientes) ===
+ media_pedidos_por_cliente | media_itens_por_cliente | media_consultas_por_requisicao | maximo_consultas_por_requisicao 
+---------------------------+-------------------------+--------------------------------+---------------------------------
+                      5.00 |                   15.00 |                          22.00 |                              32
+(1 row)
+

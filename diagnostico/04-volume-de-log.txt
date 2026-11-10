@@ -1,0 +1,21 @@
+# Diagnóstico 04: volume do log da API (server.js imprime o corpo inteiro de cada resposta com console.log)
+# Fonte: docker compose logs --no-log-prefix api, exportado em 2026-11-10 16:46:38 -0300, cobrindo contrato + 3 medições da linha de base (+ aquecimentos)
+# Gerado por: awk sobre o log exportado (comando no fim deste arquivo)
+
+linhas de log de requisicao: 840
+bytes totais dessas linhas: 974060 (0.9 MiB)
+bytes medios por linha: 1160
+maior linha: 6324 bytes
+
+Por caminho (ids trocados por :id):
+  /produtos/busca                  linhas=128    bytes_medios=1933
+  /clientes/:id                    linhas=188    bytes_medios=211
+  /saude                           linhas=4      bytes_medios=87
+  /clientes/:id/pedidos            linhas=161    bytes_medios=2179
+  /relatorios/top-produtos         linhas=43     bytes_medios=1537
+  /pedidos                         linhas=109    bytes_medios=1841
+  /relatorios/vendas-por-dia       linhas=68     bytes_medios=549
+  /clientes                        linhas=134    bytes_medios=233
+  /clientes/abc                    linhas=5      bytes_medios=101
+
+# comando: awk sobre /tmp/api-log-baseline.txt contando linhas com "url": e somando length($0)+1
