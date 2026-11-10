@@ -1,0 +1,17 @@
+Medição: 01-pool-conexoes
+Carga: 20 usuários virtuais por 60s
+
+Requisições:        217
+Requisições/s:      3.13
+Tempo de resposta:  mediana 1604.7 ms | p95 22544.1 ms | p99 27404.7 ms
+Erros:              0.00%
+
+Por rota:
+rota                  req       mediana       p95           p99           erros   
+cliente               54        776.8 ms      1544.0 ms     1843.5 ms     0.0%    
+cliente-por-email     38        1454.9 ms     2211.2 ms     2466.7 ms     0.0%    
+pedidos-do-cliente    49        19200.5 ms    27317.0 ms    29000.7 ms    0.0%    
+pedidos-por-status    23        5193.0 ms     13378.9 ms    17636.1 ms    0.0%    
+busca-produtos        35        938.0 ms      1437.2 ms     1564.1 ms     0.0%    
+vendas-por-dia        15        4209.8 ms     7573.4 ms     7688.5 ms     0.0%    
+top-produtos          3         13100.5 ms    17056.9 ms    17408.6 ms    0.0%    
