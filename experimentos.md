@@ -15,6 +15,7 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 | 02 | Índices secundários e trigramas (commit `d07be10`) | Aplicada e medida | 01 | 3.13 → 12.84 | 22544.1 ms → 6381.4 ms | 98.4% → 97.6% | 32.5 MiB → 87.0 MiB | Vazão quadruplicou e mediana caiu de 1603,5 ms para 302,5 ms; CPU do banco segue saturada pelo N+1 e pelos relatórios |
 | 03 | Eliminação do N+1 em `/clientes/:id/pedidos` (commit `2276929`) | Aplicada e medida | 02 | 12.84 → 12.66 | 6381.4 ms → 4836.8 ms | 97.6% → 96.7% | 87.0 MiB → 41.4 MiB | p95 geral caiu de 6381,4 para 4836,8 ms e a mediana da rota `pedidos-do-cliente` caiu de 2794,5 para 1316,4 ms; vazão total segue limitada na CPU do banco pelos relatórios |
 | 04 | Projeção de colunas e agregação SQL em `vendas-por-dia` (commit `56b1d5f`) | Aplicada e medida | 03 | 12.66 → 22.44 | 4836.8 ms → 1655.7 ms | 96.7% → 99.7% | 41.4 MiB → 27.2 MiB | Vazão subiu para 22,44 req/s e p95 caiu para 1655,7 ms; `top-produtos` (mediana de 13797,1 ms) passa a ser o principal consumidor da CPU do banco |
+| 05 | Materialized View `mv_top_produtos` (commit `c7aa489`) | Aplicada e medida | 04 | 22.44 → 144.74 | 1655.7 ms → 398.7 ms | 99.7% → 97.9% | 27.2 MiB → 29.5 MiB | Vazão saltou de 22,44 para 144,74 req/s, p95 caiu para 398,7 ms, p99 caiu de 12045,5 para 504,1 ms e memória do banco caiu de 445,4 para 347,6 MiB |
 
 ## 00 · Linha de base
 
@@ -166,3 +167,37 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 - Na rota `vendas-por-dia`, a mediana despencou de **4300.8 ms para 798.1 ms** e o p95 de **8659.0 ms para 1762.9 ms**; na rota `pedidos-por-status`, o p95 caiu de **5137.2 ms para 1691.1 ms**.
 - O uso de CPU média da API caiu de **15.6% para 4.1%** e a memória média da API caiu de **41.4 MiB para 27.2 MiB**, pois o Node.js deixou de receber e iterar sobre dezenas de milhares de linhas brutas com `observacoes`.
 - A CPU do banco permaneceu cravada em **99.7%** por causa de uma única rota restante: `top-produtos` (2% da carga, 28 chamadas em 60s), cuja mediana é **13797.1 ms** (p95 de **32000.3 ms**), varrendo 1,35 milhão de itens a cada execução. A próxima mudança (`05-mv-top-produtos`) ataca diretamente esse gargalo.
+
+## 05 · Materialized View `mv_top_produtos` para `GET /relatorios/top-produtos`
+
+- **Problema (diagnóstico):** a consulta de `GET /relatorios/top-produtos` faz *Hash Join* e agregação sobre 1,35 milhão de itens de pedidos não cancelados e 500 mil pedidos a cada chamada, levando 1.429,7 ms mesmo com o banco ocioso ([diagnostico/02-explain-consultas.txt](diagnostico/02-explain-consultas.txt)) e 13.797,1 ms de mediana sob carga no experimento 04.
+- **Hipótese:** pré-agregar a soma de unidades e receita por produto em uma *Materialized View* (`mv_top_produtos`) indexada por `(receita_centavos DESC, id)` em `banco/04-mv-top-produtos.sql` deve eliminar a varredura de 1,35 milhão de itens em cada chamada, reduzindo drasticamente o tempo de `top-produtos`, o p95/p99 gerais e o uso de memória do banco, além de multiplicar a vazão geral.
+- **Fontes:**
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 41.3. Materialized Views*. https://www.postgresql.org/docs/16/rules-materializedviews.html
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 11.4. Indexes and ORDER BY*. https://www.postgresql.org/docs/16/indexes-ordering.html
+- **Mudança:** commit `c7aa489`, adicionando `banco/04-mv-top-produtos.sql` e atualizando `GET /relatorios/top-produtos` em `api/src/rotas.js`
+- **Contrato:** mantido nas 3 execuções (`contrato.txt` de cada pasta)
+- **Pastas:**
+  - [20261117-152945-05-mv-top-produtos](resultados/20261117-152945-05-mv-top-produtos/)
+  - [20261117-153106-05-mv-top-produtos](resultados/20261117-153106-05-mv-top-produtos/)
+  - [20261117-153226-05-mv-top-produtos](resultados/20261117-153226-05-mv-top-produtos/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** | Antes (04) |
+|---|---|---|---|---|---|
+| Requisições/s | 30.25 | 144.74 | 146.20 | **144.74** | 22.44 |
+| Tempo de resposta: mediana | 397.3 ms | 99.6 ms | 99.1 ms | **99.6 ms** | 397.7 ms |
+| Tempo de resposta: p95 | 2199.1 ms | 398.3 ms | 398.7 ms | **398.7 ms** | 1655.7 ms |
+| Tempo de resposta: p99 | 3611.4 ms | 504.1 ms | 502.6 ms | **504.1 ms** | 12045.5 ms |
+| Mediana da rota `top-produtos` | 199.2 ms | 88.8 ms | 88.4 ms | **88.8 ms** | 13797.1 ms |
+| p95 da rota `top-produtos` | 555.5 ms | 104.3 ms | 189.6 ms | **189.6 ms** | 32000.3 ms |
+| Erros | 0.00% | 0.00% | 0.00% | **0.00%** | 0.00% |
+| CPU média banco | 95.5% | 98.2% | 97.9% | **97.9%** | 99.7% |
+| Memória média banco | 465.9 MiB | 347.6 MiB | 340.8 MiB | **347.6 MiB** | 445.4 MiB |
+| CPU média api | 7.0% | 13.8% | 13.4% | **13.4%** | 4.1% |
+| Memória média api | 26.8 MiB | 29.5 MiB | 29.6 MiB | **29.5 MiB** | 27.2 MiB |
+
+**Conclusão:**
+- Salto expressivo no desempenho geral: a mediana das requisições/s subiu de **22.44 para 144.74 req/s** (8.713 requisições em 60s), a mediana geral caiu de **397.7 ms para 99.6 ms**, o **p95 geral caiu de 1655.7 ms para 398.7 ms**, e o **p99 geral despencou de 12045.5 ms para 504.1 ms**.
+- Na rota `top-produtos`, a mediana caiu de **13797.1 ms para 88.8 ms** e o p95 de **32000.3 ms para 189.6 ms**.
+- A memória média do container do banco caiu de **445.4 MiB para 347.6 MiB**, pois o PostgreSQL deixou de alocar as tabelas de hash paralelas de `top-produtos`.
+- Com a API agora atendendo ~145 req/s (8.713 respostas em 60s), o uso de CPU da API subiu de **4.1% para 13.4%**, impulsionado pela serialização e impressão síncrona do corpo inteiro de cada resposta no `console.log` em `api/src/server.js` ([diagnostico/04-volume-de-log.txt](diagnostico/04-volume-de-log.txt)). A próxima mudança (`06-remover-log-resposta`) avalia a remoção desse log.
