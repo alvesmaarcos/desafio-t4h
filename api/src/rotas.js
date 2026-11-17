@@ -67,37 +67,45 @@ rotas.get('/clientes/:id/pedidos', assincrono(async (req, res) => {
   if (clientes.length === 0) return res.status(404).json({ erro: 'cliente nao encontrado' });
 
   const pedidos = await consultar(
-    'SELECT * FROM pedidos WHERE cliente_id = $1 ORDER BY criado_em DESC, id DESC',
+    'SELECT id, status, criado_em FROM pedidos WHERE cliente_id = $1 ORDER BY criado_em DESC, id DESC',
     [id],
   );
+  if (pedidos.length === 0) return res.json([]);
 
-  const resposta = [];
+  const pedidoIds = pedidos.map((pedido) => pedido.id);
+  const itens = await consultar(
+    `SELECT i.pedido_id, i.produto_id, pr.nome AS produto_nome,
+            i.quantidade, i.preco_unitario_centavos
+       FROM itens_pedido i
+       JOIN produtos pr ON pr.id = i.produto_id
+      WHERE i.pedido_id = ANY($1::int[])
+      ORDER BY i.pedido_id, i.id`,
+    [pedidoIds],
+  );
+
+  const respostaPorPedido = new Map();
   for (const pedido of pedidos) {
-    const itens = await consultar('SELECT * FROM itens_pedido WHERE pedido_id = $1 ORDER BY id', [pedido.id]);
-
-    const itensFormatados = [];
-    let total = 0;
-    for (const item of itens) {
-      const [produto] = await consultar('SELECT * FROM produtos WHERE id = $1', [item.produto_id]);
-      itensFormatados.push({
-        produto_id: item.produto_id,
-        produto_nome: produto.nome,
-        quantidade: item.quantidade,
-        preco_unitario_centavos: item.preco_unitario_centavos,
-      });
-      total += item.quantidade * item.preco_unitario_centavos;
-    }
-
-    resposta.push({
+    respostaPorPedido.set(pedido.id, {
       id: pedido.id,
       status: pedido.status,
       criado_em: pedido.criado_em,
-      total_centavos: total,
-      itens: itensFormatados,
+      total_centavos: 0,
+      itens: [],
     });
   }
 
-  res.json(resposta);
+  for (const item of itens) {
+    const pedido = respostaPorPedido.get(item.pedido_id);
+    pedido.itens.push({
+      produto_id: item.produto_id,
+      produto_nome: item.produto_nome,
+      quantidade: item.quantidade,
+      preco_unitario_centavos: item.preco_unitario_centavos,
+    });
+    pedido.total_centavos += item.quantidade * item.preco_unitario_centavos;
+  }
+
+  res.json([...respostaPorPedido.values()]);
 }));
 
 rotas.get('/pedidos', assincrono(async (req, res) => {
