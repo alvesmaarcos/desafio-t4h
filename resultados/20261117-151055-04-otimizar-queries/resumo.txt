@@ -1,0 +1,17 @@
+Medição: 04-otimizar-queries
+Carga: 20 usuários virtuais por 60s
+
+Requisições:        1537
+Requisições/s:      22.44
+Tempo de resposta:  mediana 303.1 ms | p95 1698.8 ms | p99 12045.5 ms
+Erros:              0.00%
+
+Por rota:
+rota                  req       mediana       p95           p99           erros   
+cliente               399       199.5 ms      696.4 ms      2812.8 ms     0.0%    
+cliente-por-email     232       198.2 ms      602.7 ms      1497.2 ms     0.0%    
+pedidos-do-cliente    322       600.5 ms      2005.7 ms     3995.7 ms     0.0%    
+pedidos-por-status    221       696.8 ms      1707.7 ms     2900.2 ms     0.0%    
+busca-produtos        227       203.4 ms      804.9 ms      1376.1 ms     0.0%    
+vendas-por-dia        108       699.4 ms      1762.9 ms     2806.6 ms     0.0%    
+top-produtos          28        14248.8 ms    30536.4 ms    31202.4 ms    0.0%    

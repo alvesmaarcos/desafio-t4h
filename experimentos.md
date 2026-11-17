@@ -14,6 +14,7 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 | 01 | Pool de conexões (commit `f75f9c4`) | Aplicada e medida | 00 | 2.67 → 3.13 | 24790.3 ms → 22544.1 ms | 97.3% → 98.4% | 75.2 MiB → 32.5 MiB | Ganho pequeno; o gargalo continua na CPU do banco |
 | 02 | Índices secundários e trigramas (commit `d07be10`) | Aplicada e medida | 01 | 3.13 → 12.84 | 22544.1 ms → 6381.4 ms | 98.4% → 97.6% | 32.5 MiB → 87.0 MiB | Vazão quadruplicou e mediana caiu de 1603,5 ms para 302,5 ms; CPU do banco segue saturada pelo N+1 e pelos relatórios |
 | 03 | Eliminação do N+1 em `/clientes/:id/pedidos` (commit `2276929`) | Aplicada e medida | 02 | 12.84 → 12.66 | 6381.4 ms → 4836.8 ms | 97.6% → 96.7% | 87.0 MiB → 41.4 MiB | p95 geral caiu de 6381,4 para 4836,8 ms e a mediana da rota `pedidos-do-cliente` caiu de 2794,5 para 1316,4 ms; vazão total segue limitada na CPU do banco pelos relatórios |
+| 04 | Projeção de colunas e agregação SQL em `vendas-por-dia` (commit `56b1d5f`) | Aplicada e medida | 03 | 12.66 → 22.44 | 4836.8 ms → 1655.7 ms | 96.7% → 99.7% | 41.4 MiB → 27.2 MiB | Vazão subiu para 22,44 req/s e p95 caiu para 1655,7 ms; `top-produtos` (mediana de 13797,1 ms) passa a ser o principal consumidor da CPU do banco |
 
 ## 00 · Linha de base
 
@@ -129,3 +130,39 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 **Conclusão:**
 - A hipótese se confirmou na rota alvo e na cauda geral: na rota `pedidos-do-cliente`, a mediana caiu de **2794.5 ms para 1316.4 ms** e o p95 caiu de **8331.5 ms para 4057.8 ms**; o **p95 geral** caiu de **6381.4 ms para 4836.8 ms**, e a memória média da API caiu de **87.0 MiB para 41.4 MiB**.
 - As requisições/s gerais ficaram estáveis (12.84 → 12.66) e a mediana geral subiu (302.5 → 694.7 ms) porque a CPU do banco permanece em **96.7%**, consumida pelas varreduras pesadas de `vendas-por-dia` (mediana de 4300.8 ms) e `top-produtos` (mediana de 15991.9 ms), que serão atacadas nos experimentos 04 e 05.
+
+## 04 · Projeção de colunas e agregação SQL em `vendas-por-dia`
+
+- **Problema (diagnóstico):** (1) `GET /relatorios/vendas-por-dia` filtra por `p.criado_em::date BETWEEN $1 AND $2`, aplicando cast na coluna (o que impede o uso de `idx_pedidos_criado_em_ativos`) e transfere em média 12.945 linhas brutas (com 3.468 kB só da coluna `observacoes`) para o Node.js agrupar em memória ([diagnostico/02-explain-consultas.txt](diagnostico/02-explain-consultas.txt)); (2) `GET /pedidos` e as demais rotas usam `SELECT *`, lendo a coluna `observacoes` (média de 274 bytes por linha contra ~22 bytes das demais colunas, [diagnostico/01-tabelas-e-indices.txt](diagnostico/01-tabelas-e-indices.txt)) e impedindo *Index-Only Scan* em `idx_pedidos_status_criado_id`.
+- **Hipótese:** reescrever o filtro de data para um intervalo SARGable (`p.criado_em >= $1::timestamp AND p.criado_em < ($2::date + 1)::timestamp`), empurrar o `GROUP BY` de `vendas-por-dia` para o SQL e projetar apenas as colunas necessárias nas rotas deve reduzir drasticamente o tempo de resposta de `vendas-por-dia` e `pedidos-por-status`, diminuir o uso de CPU/memória da API e elevar as requisições/s gerais.
+- **Fontes:**
+  - Markus Winand. *Use The Index, Luke — Obfuscated Conditions: Dates*. https://use-the-index-luke.com/sql/where-clause/obfuscation/dates
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 11.4. Indexes and ORDER BY*. https://www.postgresql.org/docs/16/indexes-ordering.html
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 7.6. LIMIT and OFFSET*. https://www.postgresql.org/docs/16/queries-limit.html
+- **Mudança:** commit `56b1d5f`, em `api/src/rotas.js`
+- **Contrato:** mantido nas 3 execuções (`contrato.txt` de cada pasta)
+- **Pastas:**
+  - [20261117-150741-04-otimizar-queries](resultados/20261117-150741-04-otimizar-queries/)
+  - [20261117-150920-04-otimizar-queries](resultados/20261117-150920-04-otimizar-queries/)
+  - [20261117-151055-04-otimizar-queries](resultados/20261117-151055-04-otimizar-queries/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** | Antes (03) |
+|---|---|---|---|---|---|
+| Requisições/s | 21.57 | 22.84 | 22.44 | **22.44** | 12.66 |
+| Tempo de resposta: mediana | 397.7 ms | 399.1 ms | 303.1 ms | **397.7 ms** | 694.7 ms |
+| Tempo de resposta: p95 | 1655.7 ms | 1601.5 ms | 1698.8 ms | **1655.7 ms** | 4836.8 ms |
+| Tempo de resposta: p99 | 12470.1 ms | 11681.3 ms | 12045.5 ms | **12045.5 ms** | 13279.7 ms |
+| Mediana da rota `vendas-por-dia` | 798.1 ms | 798.8 ms | 699.4 ms | **798.1 ms** | 4300.8 ms |
+| p95 da rota `vendas-por-dia` | 1603.5 ms | 2324.4 ms | 1762.9 ms | **1762.9 ms** | 8659.0 ms |
+| p95 da rota `pedidos-por-status` | 1608.3 ms | 1691.1 ms | 1707.7 ms | **1691.1 ms** | 5137.2 ms |
+| Erros | 0.00% | 0.00% | 0.00% | **0.00%** | 0.00% |
+| CPU média banco | 99.8% | 99.7% | 99.4% | **99.7%** | 96.7% |
+| Memória média banco | 449.4 MiB | 445.4 MiB | 443.7 MiB | **445.4 MiB** | 417.0 MiB |
+| CPU média api | 4.8% | 4.1% | 3.0% | **4.1%** | 15.6% |
+| Memória média api | 25.7 MiB | 27.4 MiB | 27.2 MiB | **27.2 MiB** | 41.4 MiB |
+
+**Conclusão:**
+- Grande ganho em todas as métricas: as requisições/s subiram de **12.66 para 22.44**, a mediana geral caiu de **694.7 ms para 397.7 ms**, e o **p95 geral caiu de 4836.8 ms para 1655.7 ms**.
+- Na rota `vendas-por-dia`, a mediana despencou de **4300.8 ms para 798.1 ms** e o p95 de **8659.0 ms para 1762.9 ms**; na rota `pedidos-por-status`, o p95 caiu de **5137.2 ms para 1691.1 ms**.
+- O uso de CPU média da API caiu de **15.6% para 4.1%** e a memória média da API caiu de **41.4 MiB para 27.2 MiB**, pois o Node.js deixou de receber e iterar sobre dezenas de milhares de linhas brutas com `observacoes`.
+- A CPU do banco permaneceu cravada em **99.7%** por causa de uma única rota restante: `top-produtos` (2% da carga, 28 chamadas em 60s), cuja mediana é **13797.1 ms** (p95 de **32000.3 ms**), varrendo 1,35 milhão de itens a cada execução. A próxima mudança (`05-mv-top-produtos`) ataca diretamente esse gargalo.
