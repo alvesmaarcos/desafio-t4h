@@ -16,6 +16,7 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 | 03 | Eliminação do N+1 em `/clientes/:id/pedidos` (commit `2276929`) | Aplicada e medida | 02 | 12.84 → 12.66 | 6381.4 ms → 4836.8 ms | 97.6% → 96.7% | 87.0 MiB → 41.4 MiB | p95 geral caiu de 6381,4 para 4836,8 ms e a mediana da rota `pedidos-do-cliente` caiu de 2794,5 para 1316,4 ms; vazão total segue limitada na CPU do banco pelos relatórios |
 | 04 | Projeção de colunas e agregação SQL em `vendas-por-dia` (commit `56b1d5f`) | Aplicada e medida | 03 | 12.66 → 22.44 | 4836.8 ms → 1655.7 ms | 96.7% → 99.7% | 41.4 MiB → 27.2 MiB | Vazão subiu para 22,44 req/s e p95 caiu para 1655,7 ms; `top-produtos` (mediana de 13797,1 ms) passa a ser o principal consumidor da CPU do banco |
 | 05 | Materialized View `mv_top_produtos` (commit `c7aa489`) | Aplicada e medida | 04 | 22.44 → 144.74 | 1655.7 ms → 398.7 ms | 99.7% → 97.9% | 27.2 MiB → 29.5 MiB | Vazão saltou de 22,44 para 144,74 req/s, p95 caiu para 398,7 ms, p99 caiu de 12045,5 para 504,1 ms e memória do banco caiu de 445,4 para 347,6 MiB |
+| 06 | Remoção do log do corpo da resposta em `server.js` (commit `b8affc2`) | Aplicada, sem ganho | 05 | 144.74 → 147.08 | 398.7 ms → 398.9 ms | 97.9% → 97.8% | 29.5 MiB → 30.0 MiB | Sem ganho relevante de vazão ou latência (variação dentro do ruído); CPU da API recuou de 13,4% para 12,6%, pois o teto do sistema continua sendo 1,0 CPU do banco |
 
 ## 00 · Linha de base
 
@@ -200,4 +201,33 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 - Salto expressivo no desempenho geral: a mediana das requisições/s subiu de **22.44 para 144.74 req/s** (8.713 requisições em 60s), a mediana geral caiu de **397.7 ms para 99.6 ms**, o **p95 geral caiu de 1655.7 ms para 398.7 ms**, e o **p99 geral despencou de 12045.5 ms para 504.1 ms**.
 - Na rota `top-produtos`, a mediana caiu de **13797.1 ms para 88.8 ms** e o p95 de **32000.3 ms para 189.6 ms**.
 - A memória média do container do banco caiu de **445.4 MiB para 347.6 MiB**, pois o PostgreSQL deixou de alocar as tabelas de hash paralelas de `top-produtos`.
-- Com a API agora atendendo ~145 req/s (8.713 respostas em 60s), o uso de CPU da API subiu de **4.1% para 13.4%**, impulsionado pela serialização e impressão síncrona do corpo inteiro de cada resposta no `console.log` em `api/src/server.js` ([diagnostico/04-volume-de-log.txt](diagnostico/04-volume-de-log.txt)). A próxima mudança (`06-remover-log-resposta`) avalia a remoção desse log.
+
+## 06 · Remoção do log do corpo da resposta em `api/src/server.js`
+
+- **Problema (diagnóstico):** `api/src/server.js` intercepta `res.json` e executa `console.log(JSON.stringify({ ..., resposta: corpo }))` em toda requisição, serializando o payload duas vezes e gerando em média 1.160 bytes de log por chamada ([diagnostico/04-volume-de-log.txt](diagnostico/04-volume-de-log.txt)). Com a vazão de ~145 req/s alcançada no experimento 05, a CPU da API subiu de 4,1% para 13,4%.
+- **Hipótese:** remover o middleware que serializa e imprime o corpo de cada resposta em `api/src/server.js` deve reduzir o uso de CPU da API e aumentar as requisições/s gerais.
+- **Fonte:**
+  - Express. *Performance Best Practices: Do logging correctly*. https://expressjs.com/en/advanced/best-practice-performance/
+- **Mudança:** commit `b8affc2`, em `api/src/server.js`
+- **Status:** **Aplicada, sem ganho** (variação de vazão e latência dentro da margem de ruído entre execuções)
+- **Contrato:** mantido nas 3 execuções (`contrato.txt` de cada pasta)
+- **Pastas:**
+  - [20261117-161009-06-remover-log-resposta](resultados/20261117-161009-06-remover-log-resposta/)
+  - [20261117-161129-06-remover-log-resposta](resultados/20261117-161129-06-remover-log-resposta/)
+  - [20261117-161248-06-remover-log-resposta](resultados/20261117-161248-06-remover-log-resposta/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** | Antes (05) |
+|---|---|---|---|---|---|
+| Requisições/s | 147.81 | 147.08 | 145.18 | **147.08** | 144.74 |
+| Tempo de resposta: mediana | 98.9 ms | 98.9 ms | 99.3 ms | **98.9 ms** | 99.6 ms |
+| Tempo de resposta: p95 | 398.1 ms | 398.9 ms | 398.9 ms | **398.9 ms** | 398.7 ms |
+| Tempo de resposta: p99 | 502.5 ms | 505.7 ms | 502.8 ms | **502.8 ms** | 504.1 ms |
+| Erros | 0.00% | 0.00% | 0.00% | **0.00%** | 0.00% |
+| CPU média banco | 98.6% | 97.2% | 97.8% | **97.8%** | 97.9% |
+| Memória média banco | 185.2 MiB | 186.0 MiB | 186.2 MiB | **186.0 MiB** | 347.6 MiB |
+| CPU média api | 12.3% | 13.0% | 12.6% | **12.6%** | 13.4% |
+| Memória média api | 29.2 MiB | 30.0 MiB | 30.3 MiB | **30.0 MiB** | 29.5 MiB |
+
+**Conclusão (por que não gerou ganho significativo):**
+- A mediana de requisições/s variou de 144.74 para 147.08 (sendo que a 3ª execução do experimento 05 já havia atingido 146.20 req/s) e o p95 ficou estável (398.7 → 398.9 ms). A CPU média da API recuou apenas de 13.4% para 12.6%.
+- **Por que não melhorou:** (1) o gargalo do sistema continua sendo a **CPU do banco de dados (97.8% de 1,0 CPU)** — em particular nas consultas de `pedidos-por-status` (mediana de 209.4 ms, que ainda executa `SELECT count(*)` e `OFFSET` de até 19.980 linhas a cada chamada) e `vendas-por-dia` (mediana de 300.0 ms) — enquanto a API opera com folga (~13% contra o limite de 50% = 0,5 CPU); e (2) segundo a própria documentação do Express, `console.log()` é síncrono quando o destino é um terminal (TTY) ou arquivo, mas em containers Docker sem TTY o `stdout` é um pipe gerenciado pelo daemon do container, cujo custo em ~147 req/s é pequeno frente ao tempo de espera pelo banco.
