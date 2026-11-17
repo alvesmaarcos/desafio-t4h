@@ -13,6 +13,7 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 | 00 | Linha de base (commit `45486c6`) | — | — | 2.67 | 24790.3 ms | 97.3% | 75.2 MiB | Ponto de partida |
 | 01 | Pool de conexões (commit `f75f9c4`) | Aplicada e medida | 00 | 2.67 → 3.13 | 24790.3 ms → 22544.1 ms | 97.3% → 98.4% | 75.2 MiB → 32.5 MiB | Ganho pequeno; o gargalo continua na CPU do banco |
 | 02 | Índices secundários e trigramas (commit `d07be10`) | Aplicada e medida | 01 | 3.13 → 12.84 | 22544.1 ms → 6381.4 ms | 98.4% → 97.6% | 32.5 MiB → 87.0 MiB | Vazão quadruplicou e mediana caiu de 1603,5 ms para 302,5 ms; CPU do banco segue saturada pelo N+1 e pelos relatórios |
+| 03 | Eliminação do N+1 em `/clientes/:id/pedidos` (commit `2276929`) | Aplicada e medida | 02 | 12.84 → 12.66 | 6381.4 ms → 4836.8 ms | 97.6% → 96.7% | 87.0 MiB → 41.4 MiB | p95 geral caiu de 6381,4 para 4836,8 ms e a mediana da rota `pedidos-do-cliente` caiu de 2794,5 para 1316,4 ms; vazão total segue limitada na CPU do banco pelos relatórios |
 
 ## 00 · Linha de base
 
@@ -96,3 +97,35 @@ Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `s
 - As requisições/s quadruplicaram (3.13 → 12.84), a mediana geral caiu de 1603.5 ms para 302.5 ms, e o p95 geral caiu de 22544.1 ms para 6381.4 ms.
 - Por rota (na execução `20261116-231444-02-indices-banco`): `cliente` caiu para mediana de 106.2 ms, `cliente-por-email` para 107.1 ms, `busca-produtos` para 195.5 ms, `pedidos-por-status` para 693.2 ms e `pedidos-do-cliente` para 2485.4 ms.
 - A CPU do banco seguiu saturada em 97.6% porque: (1) `pedidos-do-cliente` (mediana de 2485.4 ms) ainda executa em média 22 consultas sequenciais por chamada (N+1); (2) `vendas-por-dia` (mediana de 2898.9 ms) aplica `criado_em::date` no filtro `WHERE` (impedindo o uso do índice em `criado_em`) e transfere milhares de linhas brutas para o Node.js; e (3) `top-produtos` (mediana de 15792.4 ms) varre e agrega 1,35 milhão de itens a cada chamada.
+
+## 03 · Eliminação de consultas N+1 em `GET /clientes/:id/pedidos`
+
+- **Problema (diagnóstico):** a rota `GET /clientes/:id/pedidos` (peso 20% na carga) executa 1 consulta para o cliente, 1 para os pedidos, 1 por pedido para os itens e 1 por item para o produto — média de 22 consultas sequenciais por requisição e máximo de 32 ([diagnostico/01-tabelas-e-indices.txt](diagnostico/01-tabelas-e-indices.txt)).
+- **Hipótese:** substituir os dois loops aninhados de consultas em `api/src/rotas.js` por uma única consulta de itens com `JOIN produtos` (`WHERE i.pedido_id = ANY($1::int[]) ORDER BY i.pedido_id, i.id`) deve reduzir pela metade ou mais a mediana e o p95 da rota `pedidos-do-cliente` e o p95 geral.
+- **Fontes:**
+  - node-postgres. *Pooling*. https://node-postgres.com/features/pooling
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 11.1. Indexes: Introduction*. https://www.postgresql.org/docs/16/indexes-intro.html
+- **Mudança:** commit `2276929`, em `api/src/rotas.js` (rota `GET /clientes/:id/pedidos`)
+- **Contrato:** mantido nas 3 execuções (`contrato.txt` de cada pasta)
+- **Pastas:**
+  - [20261116-232142-03-eliminar-n-mais-1](resultados/20261116-232142-03-eliminar-n-mais-1/)
+  - [20261116-232311-03-eliminar-n-mais-1](resultados/20261116-232311-03-eliminar-n-mais-1/)
+  - [20261116-232442-03-eliminar-n-mais-1](resultados/20261116-232442-03-eliminar-n-mais-1/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** | Antes (02) |
+|---|---|---|---|---|---|
+| Requisições/s | 12.66 | 13.81 | 11.83 | **12.66** | 12.84 |
+| Tempo de resposta: mediana | 694.7 ms | 606.6 ms | 709.6 ms | **694.7 ms** | 302.5 ms |
+| Tempo de resposta: p95 | 5503.8 ms | 4731.9 ms | 4836.8 ms | **4836.8 ms** | 6381.4 ms |
+| Tempo de resposta: p99 | 13675.7 ms | 11445.7 ms | 13279.7 ms | **13279.7 ms** | 14242.9 ms |
+| Mediana da rota `pedidos-do-cliente` | 1389.0 ms | 1098.4 ms | 1316.4 ms | **1316.4 ms** | 2794.5 ms |
+| p95 da rota `pedidos-do-cliente` | 4057.8 ms | 4277.1 ms | 3357.3 ms | **4057.8 ms** | 8331.5 ms |
+| Erros | 0.00% | 0.00% | 0.00% | **0.00%** | 0.00% |
+| CPU média banco | 96.7% | 97.7% | 96.6% | **96.7%** | 97.6% |
+| Memória média banco | 417.0 MiB | 411.9 MiB | 417.0 MiB | **417.0 MiB** | 415.3 MiB |
+| CPU média api | 15.6% | 17.5% | 14.8% | **15.6%** | 15.6% |
+| Memória média api | 41.4 MiB | 42.3 MiB | 41.2 MiB | **41.4 MiB** | 87.0 MiB |
+
+**Conclusão:**
+- A hipótese se confirmou na rota alvo e na cauda geral: na rota `pedidos-do-cliente`, a mediana caiu de **2794.5 ms para 1316.4 ms** e o p95 caiu de **8331.5 ms para 4057.8 ms**; o **p95 geral** caiu de **6381.4 ms para 4836.8 ms**, e a memória média da API caiu de **87.0 MiB para 41.4 MiB**.
+- As requisições/s gerais ficaram estáveis (12.84 → 12.66) e a mediana geral subiu (302.5 → 694.7 ms) porque a CPU do banco permanece em **96.7%**, consumida pelas varreduras pesadas de `vendas-por-dia` (mediana de 4300.8 ms) e `top-produtos` (mediana de 15991.9 ms), que serão atacadas nos experimentos 04 e 05.
