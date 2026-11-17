@@ -1,24 +1,68 @@
-# Registro de Experimentos
+# Experimentos
 
-Todas as medições foram executadas na mesma máquina com os parâmetros padrão (`VUS=20`, `DURACAO=60s`, `AQUECIMENTO=15s`, `SEMENTE=42`) e com os mesmos limites de recursos (`banco`: 1,0 CPU e 512 MB; `api`: 0,5 CPU e 256 MB).
+Uma linha por ideia aplicada. Todos os números saem dos arquivos gerados por `scripts/medir.sh` em `resultados/`, sem edição.
 
-Os números de **antes** e **depois** riportados na tabela abaixo correspondem à **mediana das 3 execuções** de cada rótulo, geradas sem edição manual por `scripts/medir.sh`. Cada mudança é comparada contra a **mudança imediatamente anterior** (e a primeira mudança contra a `00-linha-de-base`).
+**Como comparar:** cada mudança roda 3 vezes com o mesmo rótulo. Na tabela vai a **mediana das 3 execuções** de cada métrica, tirada dos `resumo.txt` e `recursos.txt` de cada pasta. O **antes** de cada mudança é a **mudança anterior** (o antes da primeira é a linha de base).
 
-## Linha de Base (`00-linha-de-base` — commit `45486c6`)
+**Parâmetros de todas as medições:** `VUS=20`, `DURACAO=60s`, `AQUECIMENTO=15s`, `SEMENTE=42` (registrados em `contexto.txt`). Limites dos containers: `api` 0,5 CPU / 256 MB e `banco` 1 CPU / 512 MB, salvo quando a mudança disser o contrário.
 
-- **Pastas de resultados**:
-  - [`resultados/20261110-160054-00-linha-de-base`](resultados/20261110-160054-00-linha-de-base/resumo.txt) (`2.79 req/s`, mediana `1298.6 ms`, p95 `23966.7 ms`, p99 `25301.1 ms`, erros `0.00%`, CPU média banco `97.1%`, mem média banco `401.6 MiB`, CPU média API `6.8%`, mem média API `32.8 MiB`)
-  - [`resultados/20261110-160250-00-linha-de-base`](resultados/20261110-160250-00-linha-de-base/resumo.txt) (`2.61 req/s`, mediana `1302.4 ms`, p95 `24790.3 ms`, p99 `27952.7 ms`, erros `0.52%`, CPU média banco `98.0%`, mem média banco `405.7 MiB`, CPU média API `6.2%`, mem média API `75.7 MiB`)
-  - [`resultados/20261110-160435-00-linha-de-base`](resultados/20261110-160435-00-linha-de-base/resumo.txt) (`2.67 req/s`, mediana `1182.2 ms`, p95 `25051.1 ms`, p99 `29013.6 ms`, erros `0.55%`, CPU média banco `97.3%`, mem média banco `404.7 MiB`, CPU média API `6.3%`, mem média API `75.2 MiB`)
-- **Mediana das 3 execuções (`00-linha-de-base`)**:
-  - **Vazão**: `2.67 req/s` (`191` requisições em 60s)
-  - **Tempo de resposta**: mediana `1298.6 ms` | **p95 `24790.3 ms`** | p99 `27952.7 ms` | erros `0.52%`
-  - **Recursos**: banco `97.3%` CPU média / `404.7 MiB` mem média; API `6.3%` CPU média / `75.2 MiB` mem média
+## Resumo
 
----
+| # | Mudança | Status | Antes | req/s antes → depois | p95 antes → depois | CPU média banco antes → depois | Memória média api antes → depois | Conclusão |
+|---|---|---|---|---|---|---|---|---|
+| 00 | Linha de base (commit `45486c6`) | — | — | 2.67 | 24790.3 ms | 97.3% | 75.2 MiB | Ponto de partida |
+| 01 | Pool de conexões (commit `f75f9c4`) | Aplicada e medida | 00 | 2.67 → 3.13 | 24790.3 ms → 22544.1 ms | 97.3% → 98.4% | 75.2 MiB → 32.5 MiB | Ganho pequeno; o gargalo continua na CPU do banco |
 
-## Tabela de Mudanças Aplicadas
+## 00 · Linha de base
 
-| Mudança (Rótulo e Commit) | Hipótese | Fonte | Status | Antes (Mediana de 3 execuções) | Depois (Mediana de 3 execuções) | Pastas de resultados (Antes → Depois) | Conclusão |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`01-pool-conexoes`** (`commit f75f9c4`)<br>Troca de `new Client()` a cada query por `new Pool()` em `api/src/db.js` | Reutilizar conexões via `pg.Pool` deve aumentar a vazão (`req/s`) e reduzir o p95 e o uso de memória da API, pois elimina o handshake TCP e a criação/destruição de um processo backend no PostgreSQL a cada consulta (medido em `6.361 ms` vs `0.199 ms` em [`diagnostico/03-custo-conexao.txt`](diagnostico/03-custo-conexao.txt)). | [node-postgres — Pooling](https://node-postgres.com/features/pooling); [PostgreSQL 16 Docs — 52.2. How Connections Are Established](https://www.postgresql.org/docs/16/connect-estab.html) | Aplicada e medida | **Base (`00-linha-de-base`)**:<br>• `2.67 req/s` (`191` req)<br>• mediana `1298.6 ms`<br>• **p95 `24790.3 ms`**<br>• p99 `27952.7 ms`<br>• erros `0.52%`<br>• Banco: CPU `97.3%`, Mem `404.7 MiB`<br>• API: CPU `6.3%`, Mem `75.2 MiB` | **`01-pool-conexoes`**:<br>• **`3.13 req/s`** (`215` req)<br>• mediana `1603.5 ms`<br>• **p95 `22544.1 ms`**<br>• p99 `27160.9 ms`<br>• erros **`0.00%`**<br>• Banco: CPU `98.4%`, Mem `405.4 MiB`<br>• API: CPU `5.8%`, Mem **`32.5 MiB`** | **Antes**:<br>[`20261110-160054-00-linha-de-base`](resultados/20261110-160054-00-linha-de-base/resumo.txt),<br>[`20261110-160250-00-linha-de-base`](resultados/20261110-160250-00-linha-de-base/resumo.txt),<br>[`20261110-160435-00-linha-de-base`](resultados/20261110-160435-00-linha-de-base/resumo.txt)<br><br>**Depois**:<br>[`20261110-171233-01-pool-conexoes`](resultados/20261110-171233-01-pool-conexoes/resumo.txt),<br>[`20261110-171716-01-pool-conexoes`](resultados/20261110-171716-01-pool-conexoes/resumo.txt),<br>[`20261110-172047-01-pool-conexoes`](resultados/20261110-172047-01-pool-conexoes/resumo.txt) | **Ganho moderado, revelando o gargalo real no banco**: a vazão subiu **+17,2%** (`2.67` → `3.13 req/s`), o p95 caiu **-9,1%** (`24790.3` → `22544.1 ms`), os erros de timeout zeraram (`0.52%` → `0.00%`) e a memória média da API caiu **-56,8%** (`75.2` → `32.5 MiB`). Porém, a CPU do banco seguiu saturada em `98.4%` porque as consultas continuam fazendo *Sequential Scans* em tabelas de até 1,5M linhas. |
+- **Commit:** `45486c6` (aplicação como veio)
+- **Pastas:**
+  - [20261110-160054-00-linha-de-base](resultados/20261110-160054-00-linha-de-base/)
+  - [20261110-160250-00-linha-de-base](resultados/20261110-160250-00-linha-de-base/)
+  - [20261110-160435-00-linha-de-base](resultados/20261110-160435-00-linha-de-base/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** |
+|---|---|---|---|---|
+| Requisições/s | 2.79 | 2.61 | 2.67 | **2.67** |
+| Tempo de resposta: mediana | 1298.6 ms | 1302.4 ms | 1182.2 ms | **1298.6 ms** |
+| Tempo de resposta: p95 | 23966.7 ms | 24790.3 ms | 25051.1 ms | **24790.3 ms** |
+| Tempo de resposta: p99 | 25301.1 ms | 27952.7 ms | 29013.6 ms | **27952.7 ms** |
+| Erros | 0.00% | 0.52% | 0.55% | **0.52%** |
+| CPU média banco | 97.1% | 98.0% | 97.3% | **97.3%** |
+| Memória média banco | 401.6 MiB | 405.7 MiB | 404.7 MiB | **404.7 MiB** |
+| CPU média api | 6.8% | 6.2% | 6.3% | **6.3%** |
+| Memória média api | 32.8 MiB | 75.7 MiB | 75.2 MiB | **75.2 MiB** |
+
+## 01 · Pool de conexões
+
+- **Problema (diagnóstico):** `api/src/db.js` abre e fecha uma conexão a cada consulta. `SELECT 1` com conexão nova: mediana 6,361 ms; com conexão reutilizada: 0,199 ms ([diagnostico/03-custo-conexao.txt](diagnostico/03-custo-conexao.txt)). `GET /clientes/:id/pedidos` faz em média 22 consultas por requisição ([diagnostico/01-tabelas-e-indices.txt](diagnostico/01-tabelas-e-indices.txt)).
+- **Hipótese:** trocar a conexão nova por consulta por um `pg.Pool` deve aumentar as requisições/s e reduzir o p95 geral, porque cada consulta deixa de pagar o handshake e a criação de um processo novo no PostgreSQL.
+  > A hipótese foi escrita no plano antes da mudança, mas só entrou neste arquivo junto com os resultados (commit `151b845`). A partir da mudança 02, a hipótese é registrada aqui antes da mudança.
+- **Fontes:**
+  - node-postgres. *Pooling*. https://node-postgres.com/features/pooling
+  - PostgreSQL Global Development Group. *PostgreSQL 16 Documentation, 52.2. How Connections Are Established*. https://www.postgresql.org/docs/16/connect-estab.html
+- **Mudança:** commit `f75f9c4`, só em `api/src/db.js` (`new Client()` por consulta → `new Pool()` com a configuração padrão do `pg`)
+- **Contrato:** mantido nas 3 execuções (`contrato.txt` de cada pasta)
+- **Pastas:**
+  - [20261110-171233-01-pool-conexoes](resultados/20261110-171233-01-pool-conexoes/)
+  - [20261110-171716-01-pool-conexoes](resultados/20261110-171716-01-pool-conexoes/)
+  - [20261110-172047-01-pool-conexoes](resultados/20261110-172047-01-pool-conexoes/)
+
+| Métrica | Execução 1 | Execução 2 | Execução 3 | **Mediana** | Antes (00) |
+|---|---|---|---|---|---|
+| Requisições/s | 3.16 | 3.13 | 3.10 | **3.13** | 2.67 |
+| Tempo de resposta: mediana | 1493.8 ms | 1604.7 ms | 1603.5 ms | **1603.5 ms** | 1298.6 ms |
+| Tempo de resposta: p95 | 21947.0 ms | 22544.1 ms | 23407.0 ms | **22544.1 ms** | 24790.3 ms |
+| Tempo de resposta: p99 | 26808.2 ms | 27404.7 ms | 27160.9 ms | **27160.9 ms** | 27952.7 ms |
+| Erros | 0.00% | 0.00% | 0.00% | **0.00%** | 0.52% |
+| CPU média banco | 95.6% | 98.6% | 98.4% | **98.4%** | 97.3% |
+| Memória média banco | 405.4 MiB | 411.8 MiB | 399.0 MiB | **405.4 MiB** | 404.7 MiB |
+| CPU média api | 5.9% | 5.0% | 5.8% | **5.8%** | 6.3% |
+| Memória média api | 28.5 MiB | 33.6 MiB | 32.5 MiB | **32.5 MiB** | 75.2 MiB |
+
+**Conclusão:**
+- As requisições/s subiram (2.67 → 3.13) e o p95 caiu (24790.3 → 22544.1 ms). Mesmo a pior execução de 01 (3.10 req/s) ficou acima da melhor da linha de base (2.79 req/s).
+- A mediana geral do tempo de resposta **piorou** (1298.6 → 1603.5 ms). Uma explicação provável, ainda não verificada: com o pool, mais consultas chegam ao banco ao mesmo tempo e disputam a mesma CPU, que continua saturada (97.3% → 98.4%).
+- Os erros foram de 0.52% para 0.00%, mas na linha de base eles vinham de 1 timeout em `top-produtos` (3 amostras por execução). Com tão poucas amostras, isso não sustenta uma conclusão.
+- A memória média da API caiu (75.2 → 32.5 MiB), mas a 1ª execução da linha de base já tinha 32.8 MiB. A variação entre execuções é grande demais para atribuir a queda ao pool.
+- **O gargalo não é a conexão, é o trabalho do banco:** a CPU do banco continua acima de 95% porque as consultas ainda leem tabelas inteiras ([diagnostico/README.md](diagnostico/README.md), achado A1). A próxima mudança ataca isso.
