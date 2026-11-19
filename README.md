@@ -1,8 +1,21 @@
 # Vaga Estágio Pesquisa e Inovação 2026 - Desafios Técnicos
 
-Aplicação do desafio técnico da vaga de estágio em Pesquisa e Inovação da Tech for Humans. O enunciado, com a missão, as entregas e os critérios de avaliação, é enviado na largada. Este README cobre só como instalar, rodar e medir a aplicação, e é a referência de todos os comandos.
+Aplicação do desafio técnico da vaga de estágio em Pesquisa e Inovação da Tech for Humans. O enunciado, com a missão, as entregas e os critérios de avaliação, é enviado na largada. Este README resume os resultados e reúne as instruções para instalar, rodar e medir a aplicação.
 
 A aplicação é a API de uma loja fictícia, em Node.js (Express) com PostgreSQL 16, rodando em containers. Ela funciona, mas fica lenta sob carga e gasta mais recursos do que deveria. Todos os dados são sintéticos e gerados na primeira subida: 100 mil clientes, 20 mil produtos, 500 mil pedidos e 1,5 milhão de itens de pedido.
+
+## Problema e resultados
+
+Sob carga, o PostgreSQL ficava perto do limite de CPU com varreduras de tabelas, consultas repetidas e agregações refeitas a cada chamada. Os índices secundários e a view materializada do ranking de produtos trouxeram os maiores ganhos de vazão.
+
+| Métrica | Linha de base | Após a etapa 06 |
+| --- | --- | --- |
+| Latência p95 geral | 24.790,3 ms | 398,9 ms |
+| Vazão | 2,67 req/s | 147,08 req/s |
+
+Os valores são as medianas de três execuções por etapa, com 20 usuários virtuais, 60 segundos de carga e semente 42. O contrato HTTP foi mantido, com os mesmos limites de CPU e memória para a API e o banco.
+
+[Experimentos e medições](experimentos.md) · [Artigo](artigo/artigo.md) · [Próximos testes](proximos-testes.md)
 
 ## Prazo e entrega
 
@@ -151,7 +164,7 @@ docker compose ps
 ```
 NAME                          IMAGE                     ...   SERVICE   STATUS                    PORTS
 desafio-performance-api-1     desafio-performance-api   ...   api       Up 3 seconds              127.0.0.1:3000->3000/tcp
-desafio-performance-banco-1   postgres:16.4             ...   banco     Up 24 seconds (healthy)   127.0.0.1:5432->5432/tcp
+desafio-performance-banco-1   postgres:16.4             ...   banco     Up 24 seconds (healthy)   127.0.0.1:5433->5432/tcp
 ```
 
 O banco precisa aparecer como `(healthy)`. Referência dos comandos: [docker compose](https://docs.docker.com/reference/cli/docker/compose/) (em inglês).
@@ -352,7 +365,7 @@ As pastas novas em `resultados/` continuam lá quando você volta para a `main`.
 docker compose exec banco psql -U loja -d loja
 ```
 
-Também dá para conectar de fora, por exemplo com DBeaver ou pgAdmin: host `127.0.0.1`, porta `5432`, usuário `loja`, banco `loja`, sem senha. A porta só aceita conexões da sua máquina.
+Também dá para conectar de fora, por exemplo com DBeaver ou pgAdmin: host `127.0.0.1`, porta `5433`, usuário `loja`, banco `loja`, sem senha. A porta só aceita conexões da sua máquina. Na rede do Compose, a API usa `banco:5432`.
 
 Os logs da API ficam em `docker compose logs -f api`.
 
@@ -394,7 +407,7 @@ Abra o agente dentro da sua cópia desta pasta. Na raiz do t4h-desafios, o `CLAU
 - **`unknown command: docker compose` ou `docker: 'compose' is not a docker command`:** o Docker está desatualizado. Instale a versão atual pelo [passo 3](#3-instalar-o-docker). O comando antigo `docker-compose`, com hífen, não serve.
 - **`No such file or directory` ao entrar na pasta:** o nome tem espaços ou acentos e precisa de aspas, por exemplo `cd "Vaga - Estágio Pesquisa e Inovação 2026"`. Use `ls` para ver o nome exato.
 - **`permission denied: scripts/medir.sh`:** os scripts perderam a permissão de execução, o que acontece quando a pasta é baixada como ZIP em vez de clonada. Rode `chmod +x scripts/*.sh`.
-- **Porta 5432 ou 3000 em uso:** pare o outro serviço ou troque o lado esquerdo do mapeamento em `ports:` no `docker-compose.yml`. Se trocar a porta da API, rode as medições com a nova porta, por exemplo `PORTA_API=3001 scripts/medir.sh 00-linha-de-base`.
+- **Porta 5433 ou 3000 em uso:** pare o outro serviço ou troque o lado esquerdo do mapeamento em `ports:` no `docker-compose.yml`. Se trocar a porta da API, rode as medições com a nova porta, por exemplo `PORTA_API=3001 scripts/medir.sh 00-linha-de-base`.
 - **`medir.sh` diz que a API não respondeu:** veja se o banco já terminou de gerar os dados (`docker compose logs banco`).
 - **Erro `bash\r` ou `$'\r': command not found` no Windows:** o Git converteu as quebras de linha. Isso acontece quando o repositório é clonado pelo Git do Windows em vez do Git do Ubuntu. Rode `git config --global core.autocrlf false` e clone de novo, de preferência dentro do Ubuntu, como no [passo 4](#4-criar-a-sua-cópia-do-desafio).
 
